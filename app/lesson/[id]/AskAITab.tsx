@@ -2,19 +2,16 @@
 
 import { useMemo, useState } from "react";
 import type { Lesson } from "../../lib/content";
+import { cn, theme } from "../../lib/theme";
 
 export default function AskAITab({ lesson }: { lesson: Lesson }) {
   const [question, setQuestion] = useState("");
-  const [sqlAttempt, setSqlAttempt] = useState("");
   const [answer, setAnswer] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
 
-  const chatgptUrl = "https://chatgpt.com/";
-
+  // Keep: a simple, non-SQL context to help ChatGPT answer better.
   const context = useMemo(() => {
     return [
-      "You are a SQL tutor. Help me understand. Prefer hints and explanations over giving the final answer immediately.",
+      "You are a helpful tutor. Answer clearly and concisely, with examples when useful.",
       "",
       `Lesson: ${lesson.title}`,
       `Summary: ${lesson.summary}`,
@@ -26,103 +23,69 @@ export default function AskAITab({ lesson }: { lesson: Lesson }) {
       lesson.syntax,
       "",
       "Examples:",
-      ...(lesson.examples ?? []).map((e, i) => `Example ${i + 1}:\n${e}\n`),
+      ...(lesson.examples ?? []).map((e) => e),
       "",
-      "My question:",
-      question || "(no question typed yet)",
-      "",
-      "My SQL attempt:",
-      sqlAttempt || "(no SQL attempt provided)",
+      "User question:",
     ].join("\n");
-  }, [lesson, question, sqlAttempt]);
+  }, [lesson]);
 
-  async function copyContext() {
-    await navigator.clipboard.writeText(context);
-  }
-
-  async function askInApp() {
-    setLoading(true);
-    setErr(null);
-    setAnswer(null);
-
-    try {
-      const res = await fetch("/api/ask-ai", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ context }),
-      });
-
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `Request failed (${res.status})`);
-      }
-
-      const data = (await res.json()) as { answer: string };
-      setAnswer(data.answer);
-    } catch (e: any) {
-      setErr(e?.message ?? "Something went wrong.");
-    } finally {
-      setLoading(false);
-    }
-  }
+  const chatgptUrl = useMemo(() => {
+    const prompt = `${context}\n${question.trim()}`;
+    return `https://chatgpt.com/?q=${encodeURIComponent(prompt)}`;
+  }, [context, question]);
 
   return (
-    <div className="space-y-4">
+    <section className={cn(theme.card.base, theme.card.padding, theme.card.section)}>
       <div>
         <h2 className="text-lg font-semibold">Ask AI</h2>
-        <p className="mt-1 text-sm text-zinc-600">
-          Type in your question.  If it is for a specific SQL command, include the SQL.
+        <p className={cn("mt-1 text-sm", theme.page.mutedText)}>
+          Ask any question about this lesson. We’ll open ChatGPT with the lesson context.
         </p>
       </div>
 
       <div className="space-y-2">
-        <label className="text-sm font-medium">Your question</label>
+        <label className={theme.input.label}>Your question</label>
         <textarea
-          className="w-full rounded-xl border p-3 text-sm"
-          rows={3}
+          className={theme.input.textarea}
           value={question}
           onChange={(e) => setQuestion(e.target.value)}
-          placeholder="What are you stuck on?"
+          placeholder="Ask anything…"
+          rows={4}
         />
-      </div>
-
-      <div className="space-y-2">
-        <label className="text-sm font-medium">Your SQL attempt (optional)</label>
-        <textarea
-          className="w-full rounded-xl border p-3 font-mono text-sm"
-          rows={6}
-          value={sqlAttempt}
-          onChange={(e) => setSqlAttempt(e.target.value)}
-          placeholder="Paste your query here…"
-        />
+        <p className={theme.input.helper}>
+          Tip: You can ask for examples, edge cases, or a step-by-step explanation.
+        </p>
       </div>
 
       <div className="flex flex-wrap gap-2">
+        <a
+          className={cn(theme.button.base, theme.button.primary)}
+          href={chatgptUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Ask in ChatGPT →
+        </a>
 
         <button
           type="button"
-          onClick={askInApp}
-          className="rounded-2xl border px-3 py-2 text-sm hover:bg-zinc-50"
-          disabled={loading}
+          className={cn(theme.button.base, theme.button.secondary)}
+          onClick={() => {
+            setQuestion("");
+            setAnswer(null);
+          }}
+          disabled={!question && !answer}
         >
-          {loading ? "Asking…" : "Submit"}
+          Clear
         </button>
       </div>
 
-      {err && (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-          {err}
-        </div>
-      )}
-
+      {/* Optional local placeholder (since you're not calling an API yet) */}
       {answer && (
-        <div className="rounded-2xl border bg-white p-4">
-          <h3 className="text-sm font-semibold">AI response</h3>
-          <div className="mt-2 whitespace-pre-wrap text-sm text-zinc-800">
-            {answer}
-          </div>
+        <div className={cn("rounded-xl border p-3 text-sm", theme.page.text)}>
+          {answer}
         </div>
       )}
-    </div>
+    </section>
   );
 }

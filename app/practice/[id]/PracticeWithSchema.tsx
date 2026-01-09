@@ -5,17 +5,22 @@ import type { PracticeItem } from "../../../content/types";
 import type { Dataset } from "../../../content/datasets/types";
 import PracticeRunner from "./PracticeRunner";
 import SchemaPanel from "./SchemaPanel";
+import { cn, theme } from "../../lib/theme";
 
 export default function PracticeWithSchema({
   lessonTitle,
   items,
   datasets,
   fallbackDatasetId,
+  reviewHref,
+  nextLessonHref,
 }: {
   lessonTitle: string;
   items: PracticeItem[];
   datasets: Dataset[];
   fallbackDatasetId?: string;
+  reviewHref?: string;
+  nextLessonHref?: string;
 }) {
   const [idx, setIdx] = useState(0);
 
@@ -33,7 +38,7 @@ export default function PracticeWithSchema({
         <h1 className="text-2xl font-semibold tracking-tight">
           Practice: {lessonTitle}
         </h1>
-        <p className="text-sm text-zinc-600">
+        <p className={cn("text-sm", theme.page.mutedText)}>
           Dataset: {activeDataset?.title ?? "Not configured"}
         </p>
       </header>
@@ -43,7 +48,7 @@ export default function PracticeWithSchema({
           {activeDataset ? (
             <SchemaPanel dataset={activeDataset} />
           ) : (
-            <div className="rounded-2xl border bg-white p-4 shadow-sm text-sm text-zinc-700">
+            <div className={cn(theme.card.base, "p-4 text-sm", theme.page.text)}>
               No schema configured for this question. Add a dataset with id:{" "}
               <span className="font-mono">{String(activeDatasetId)}</span>
             </div>
@@ -51,7 +56,13 @@ export default function PracticeWithSchema({
         </div>
 
         <div className="lg:col-span-2">
-          <PracticeRunner items={items} idx={idx} setIdx={setIdx} />
+            <PracticeRunner
+            items={items}
+            idx={idx}
+            setIdx={setIdx}
+            reviewHref={reviewHref ?? "/review"}
+            nextHref={nextLessonHref}
+            />
         </div>
       </div>
     </div>

@@ -1,20 +1,23 @@
 import Link from "next/link";
+import { cn, theme } from "./lib/theme";
 
 export default function Home() {
   return (
-    <main className="p-4 max-w-2xl mx-auto">
-      <h1 className="text-2xl font-bold mb-4">
+    <main className={cn("p-4 max-w-2xl mx-auto", theme.page.text)}>
+      <h1 className="mb-4 text-2xl font-bold">
         SQL Trainer (MVP)
       </h1>
 
-      <p className="mb-6">
-        A text- and image-based training site for learning SQL
-        through short lessons and lots of practice.
+      <p className={cn("mb-6", theme.page.mutedText)}>
+        Learn and retain SQL thru Spaced Repetition System (SRS)
       </p>
 
       <Link
         href="/lessons"
-        className="border rounded-2xl px-4 py-3 inline-block"
+        className={cn(
+          theme.button.base,
+          theme.button.primary
+        )}
       >
         Start Learning
       </Link>

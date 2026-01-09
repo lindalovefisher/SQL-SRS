@@ -3,24 +3,25 @@
 import { useMemo, useState } from "react";
 import type { Lesson } from "../../lib/content";
 import AskAITab from "./AskAITab";
+import { cn, theme } from "../../lib/theme";
 
 type TabKey = "concept" | "syntax" | "examples" | "ask";
 
 export default function LessonTabs({ lesson }: { lesson: Lesson }) {
   const [tab, setTab] = useState<TabKey>("concept");
 
-const tabs = useMemo(
-  () => [
-    { key: "concept" as const, label: "Concept" },
-    { key: "syntax" as const, label: "Syntax" },
-    { key: "examples" as const, label: "Examples" },
-    { key: "ask" as const, label: "Ask AI" },
-  ],
-  []
-);
+  const tabs = useMemo(
+    () => [
+      { key: "concept" as const, label: "Concept" },
+      { key: "syntax" as const, label: "Syntax" },
+      { key: "examples" as const, label: "Examples" },
+      { key: "ask" as const, label: "Ask AI" },
+    ],
+    []
+  );
 
   return (
-    <section className="rounded-2xl border bg-white shadow-sm">
+    <section className={theme.card.base}>
       {/* Tab strip */}
       <div className="flex items-center gap-1 border-b p-2">
         {tabs.map((t) => {
@@ -30,12 +31,12 @@ const tabs = useMemo(
               key={t.key}
               type="button"
               onClick={() => setTab(t.key)}
-              className={[
+              className={cn(
                 "rounded-xl px-3 py-2 text-sm transition",
                 active
                   ? "bg-zinc-900 text-white"
-                  : "text-zinc-700 hover:bg-zinc-100",
-              ].join(" ")}
+                  : cn(theme.page.text, "hover:bg-slate-100")
+              )}
             >
               {t.label}
             </button>
@@ -44,21 +45,23 @@ const tabs = useMemo(
       </div>
 
       {/* Content */}
-      <div className="p-5">
+      <div className={theme.card.padding}>
         {tab === "concept" && (
           <div className="space-y-3">
             <h2 className="text-lg font-semibold">Concept</h2>
-            <p className="leading-relaxed text-zinc-700">{lesson.concept}</p>
+            <p className={cn("leading-relaxed", theme.page.text)}>
+              {lesson.concept}
+            </p>
           </div>
         )}
 
         {tab === "syntax" && (
           <div className="space-y-3">
             <h2 className="text-lg font-semibold">Syntax</h2>
-            <pre className="overflow-x-auto rounded-xl bg-zinc-50 p-4 text-sm text-zinc-800">
+            <pre className="overflow-x-auto rounded-xl bg-slate-50 p-4 text-sm">
               <code>{lesson.syntax}</code>
             </pre>
-            <p className="text-xs text-zinc-500">
+            <p className={theme.input.helper}>
               Brackets indicate optional clauses.
             </p>
           </div>
@@ -71,7 +74,7 @@ const tabs = useMemo(
               {lesson.examples.map((ex, idx) => (
                 <pre
                   key={idx}
-                  className="overflow-x-auto rounded-xl bg-zinc-50 p-4 text-sm text-zinc-800"
+                  className="overflow-x-auto rounded-xl bg-slate-50 p-4 text-sm"
                 >
                   <code>{ex}</code>
                 </pre>
@@ -80,9 +83,7 @@ const tabs = useMemo(
           </div>
         )}
 
-        {tab === "ask" && (
-            <AskAITab lesson={lesson} />
-        )}
+        {tab === "ask" && <AskAITab lesson={lesson} />}
       </div>
     </section>
   );

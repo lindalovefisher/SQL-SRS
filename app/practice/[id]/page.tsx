@@ -10,8 +10,13 @@ export default async function PracticeLessonPage({
 }) {
   const { id } = await params;
 
-  const lesson = allLessons.find((l) => l.id === id);
-  if (!lesson) return notFound();
+  const lessonIndex = allLessons.findIndex((l) => l.id === id);
+  if (lessonIndex === -1) return notFound();
+
+  const lesson = allLessons[lessonIndex];
+
+  const nextLesson = allLessons[lessonIndex + 1] ?? null;
+  const nextLessonHref = nextLesson ? `/lesson/${nextLesson.id}` : undefined;
 
   return (
     <PracticeWithSchema
@@ -19,6 +24,9 @@ export default async function PracticeLessonPage({
       items={lesson.practice}
       datasets={datasets}
       fallbackDatasetId={lesson.defaultDatasetId}
+      reviewHref="/review"
+      nextLessonHref={nextLessonHref}
     />
   );
 }
+

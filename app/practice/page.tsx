@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { allLessons } from "../../content/lessons";
+import { cn, theme } from "../lib/theme";
 
 export default function PracticeHome() {
   return (
     <div className="space-y-6">
       <header className="space-y-2">
         <h1 className="text-3xl font-semibold tracking-tight">Practice</h1>
-        <p className="text-zinc-600">Pick a lesson to practice.</p>
+        <p className={theme.page.mutedText}>
+          Pick a lesson to practice.
+        </p>
       </header>
 
       <div className="grid gap-4 sm:grid-cols-2">
@@ -14,11 +17,20 @@ export default function PracticeHome() {
           <Link
             key={l.id}
             href={`/practice/${l.id}`}
-            className="rounded-2xl border bg-white p-4 shadow-sm hover:shadow-md transition"
+            className={cn(
+              theme.card.base,
+              "p-4 transition hover:shadow-md"
+            )}
           >
             <div className="font-semibold">{l.title}</div>
-            <div className="mt-1 text-sm text-zinc-600">{l.summary}</div>
-            <div className="mt-3 text-sm">Start →</div>
+
+            <div className={cn("mt-1 text-sm", theme.page.mutedText)}>
+              {l.summary}
+            </div>
+
+            <div className="mt-3 text-sm text-blue-600">
+              Start →
+            </div>
           </Link>
         ))}
       </div>
