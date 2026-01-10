@@ -1,10 +1,59 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { PracticeItem } from "../../../content/types";
 import { cn, theme } from "../../lib/theme";
 import Link from "next/link";
 
+export type RunResult = {
+  columns: string[];
+  rows: any[][];
+  totalRows?: number;
+  truncated?: boolean;
+};
+
+type SchemaColumn = { name: string; type?: string; description?: string };
+type SchemaTable = { name: string; columns: SchemaColumn[] };
+
+
+// Best-effort schema extraction (since PracticeItem shape may vary).
+// Supported shapes (any of these):
+// - item.schema: SchemaTable[]
+// - item.datasetSchema: SchemaTable[]
+// - item.tables: { name, columns }[]
+function getSchemaFromItem(item: PracticeItem): SchemaTable[] | null {
+  const anyItem = item as any;
+
+  const schema =
+    anyItem.schema ?? anyItem.datasetSchema ?? anyItem.tables ?? anyItem.dataset?.schema ?? null;
+
+  if (!schema) return null;
+
+  // Normalize into { name, columns: [{name,type}] }
+  try {
+    const tables: SchemaTable[] = (schema as any[]).map((t) => {
+      const name = t.name ?? t.table ?? t.tableName ?? "table";
+      const colsRaw = t.columns ?? t.cols ?? t.fields ?? [];
+      const columns: SchemaColumn[] = (colsRaw as any[]).map((c) => ({
+        name: c.name ?? c.column ?? c.field ?? String(c),
+        type: c.type ?? c.datatype ?? c.dataType ?? undefined,
+        description: c.description ?? c.desc ?? undefined,
+      }));
+      return { name, columns };
+    });
+
+    return tables.length ? tables : null;
+  } catch {
+    return null;
+  }
+}
+
+function formatCell(v: any) {
+  if (v === null) return "NULL";
+  if (v === undefined) return "";
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+}
 
 export default function PracticeRunner({
   items,
@@ -12,19 +61,27 @@ export default function PracticeRunner({
   setIdx,
   reviewHref = "/review",
   nextHref,
+  onRunUpdate,
+  schemaTables,            // ✅ add
 }: {
   items?: PracticeItem[];
   idx: number;
   setIdx: (n: number) => void;
   reviewHref?: string;
   nextHref?: string;
+  onRunUpdate?: (payload: {
+    loading: boolean;
+    error: string | null;
+    result: RunResult | null;
+  }) => void;
+  schemaTables?: SchemaTable[] | null;   // ✅ add
 }) {
   // Guard: items missing or empty
   if (!items || !Array.isArray(items) || items.length === 0) {
     return (
-      <section className="rounded-2xl border bg-white p-5 shadow-sm">
+      <section className={cn(theme.card.base, theme.card.padding)}>
         <h2 className="text-lg font-semibold">Practice</h2>
-        <p className="mt-2 text-zinc-700">
+        <p className={cn("mt-2", theme.page.mutedText)}>
           No practice questions available for this lesson yet.
         </p>
       </section>
@@ -38,15 +95,42 @@ export default function PracticeRunner({
 
   const [sql, setSql] = useState(item?.starterSql ?? "");
 
+  // Help (hidden until requested)
   const [helpOpen, setHelpOpen] = useState(false);
   const [helpLoading, setHelpLoading] = useState(false);
   const [helpError, setHelpError] = useState<string | null>(null);
   const [helpText, setHelpText] = useState<string | null>(null);
-  const [runError, setRunError] = useState<string | null>(null);
-  const [runResult, setRunResult] = useState<{ columns: string[]; rows: any[][] } | null>(null);
 
+  // Run + Results
+  const [runLoading, setRunLoading] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [runResult, setRunResult] = useState<RunResult | null>(null);
+
+  // Check
+  const [checkLoading, setCheckLoading] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
-  const [checkOk, setCheckOk] = useState<boolean | null>(null);
+    const [checkPayload, setCheckPayload] = useState<{
+    ok: boolean;
+    stringCheck: { ok: boolean; reasons?: string[]; message?: string };
+    resultCheck: { ok: boolean; reasons?: string[]; message?: string };
+    } | null>(null);
+
+    function clearOutputs() {
+
+    setRunLoading(false);
+    setCheckLoading(false);
+
+    // Run
+    setRunResult(null);
+    setRunError(null);
+
+    // Check
+    setCheckPayload(null);
+    setCheckError(null);
+
+    // If you also mirror run state in parent panel
+    onRunUpdate?.({ loading: false, error: null, result: null });
+    }
 
   async function requestHelp() {
     setHelpOpen(true);
@@ -54,7 +138,6 @@ export default function PracticeRunner({
     setHelpError(null);
     setHelpText(null);
 
-    // TEXT-ONLY prompt (no JSON requirement)
     const context = [
       "You are a SQL tutor.",
       "Help the student without revealing the full solution.",
@@ -107,57 +190,89 @@ export default function PracticeRunner({
     }
   }
 
-    async function runSql() {
+  async function runSql() {
+
+    clearOutputs();
+    setRunLoading(true);
     setRunError(null);
+
+    // Clear stale run state on the panel
+    onRunUpdate?.({ loading: true, error: null, result: null });
     setRunResult(null);
 
     try {
-        const res = await fetch("/api/sql/run", {
+      const res = await fetch("/api/sql/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        // Keep as datasetId since this is what your file currently uses
         body: JSON.stringify({ sql, datasetId: item.datasetId }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data?.error || "Run failed");
-        setRunResult(data.result);
-    } catch (e: any) {
-        setRunError(e?.message ?? "Run failed");
-    }
-    }
+      });
 
-    async function checkSql() {
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Run failed");
+
+      const result = data.result as RunResult;
+      setRunResult(result);
+      onRunUpdate?.({ loading: false, error: null, result });
+    } catch (e: any) {
+      const msg = e?.message ?? "Run failed";
+      setRunError(msg);
+      onRunUpdate?.({ loading: false, error: msg, result: null });
+    } finally {
+      setRunLoading(false);
+    }
+  }
+
+  async function checkSql() {
+    clearOutputs();
+    setCheckLoading(true);
     setCheckError(null);
-    setCheckOk(null);
+    setCheckPayload(null);
+
 
     try {
-        const res = await fetch("/api/sql/check", {
+      const res = await fetch("/api/sql/check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-            sql,
-            solutionSql: item.solutionSql,
-            datasetId: item.datasetId,
-            // Optional MVP rules per-question (add later to your PracticeItem)
-            rules: item.rules,
+          sql,
+          solutionSql: item.solutionSql,
+          datasetId: item.datasetId,
+          // If you haven't added rules to PracticeItem yet, this will just be undefined.
+          rules: (item as any).rules,
         }),
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data?.error || "Check failed");
-        setCheckOk(Boolean(data.ok));
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "Check failed");
+      setCheckPayload(data);
     } catch (e: any) {
-        setCheckError(e?.message ?? "Check failed");
+      setCheckError(e?.message ?? "Check failed");
+    } finally {
+      setCheckLoading(false);
     }
-    }
+  }
 
-
-
-  // When idx changes, reset editor and help panel
+  // When idx changes, reset editor + panels
   useEffect(() => {
     setSql(items[safeIdx]?.starterSql ?? "");
+
     setHelpOpen(false);
     setHelpText(null);
     setHelpError(null);
     setHelpLoading(false);
+
+    setRunLoading(false);
+    setRunError(null);
+    setRunResult(null);
+
+    setCheckLoading(false);
+    setCheckError(null);
+    setCheckPayload(null);
+
+    // Clear the results panel when switching questions
+    onRunUpdate?.({ loading: false, error: null, result: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [safeIdx, items]);
 
   function prev() {
@@ -168,205 +283,353 @@ export default function PracticeRunner({
     setIdx(Math.min(items.length - 1, safeIdx + 1));
   }
 
- return (
-  <section className={cn(theme.card.base, theme.card.padding, theme.card.section)}>
-    <div className="flex items-start justify-between gap-4">
-      <div>
-        <h2 className="text-lg font-semibold">
-          Question {safeIdx + 1} / {items.length}
-        </h2>
-        <p className={cn("mt-1", theme.page.text)}>{item.prompt}</p>
+  console.log("stringCheck:", checkPayload?.stringCheck);
+  return (
+    <section className={cn("space-y-4", theme.card.section)}>
+      {/* Card 1: Question header only */}
+      <div className={cn(theme.card.base, theme.card.padding)}>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold">
+              Question {safeIdx + 1} / {items.length}
+            </h2>
+            <p className={cn("mt-1", theme.page.text)}>{item.prompt}</p>
+          </div>
+
+          <span className={theme.badge.neutral}>Practice</span>
+        </div>
       </div>
 
-      <span className={theme.badge.neutral}>Practice</span>
-    </div>
+      {/* Card 2: 3-panel workspace + full-width results underneath */}
+      <div className={cn(theme.no_card.base, theme.no_card.padding)}>
+        <div className="grid gap-4 lg:grid-cols-12">
 
-        {checkError && (
-    <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-        {checkError}
-    </div>
-    )}
-
-    {checkOk !== null && (
-    <div
-        className={cn(
-        "rounded-xl border p-3 text-sm",
-        checkOk
-            ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-            : "border-amber-200 bg-amber-50 text-amber-900"
-        )}
-    >
-        {checkOk ? "✅ Correct!" : "Not quite — try again."}
-    </div>
-    )}
-
-    <div className="space-y-2">
-      <label className={theme.input.label}>Write SQL</label>
-      <textarea
-        className={theme.input.textareaMono + " h-44"}
-        value={sql}
-        onChange={(e) => setSql(e.target.value)}
-        placeholder="Type your SQL here…"
-      />
-      <p className={theme.input.helper}>(MVP) We’ll wire Run + Check next.</p>
-    </div>
-
-    <div className="flex flex-wrap gap-2">
-    <button type="button" className={cn(theme.button.base, theme.button.primary)} onClick={runSql}>
-    Run
-    </button>
-
-    <button type="button" className={cn(theme.button.base, theme.button.secondary)} onClick={checkSql}>
-    Check
-    </button>
-
-
-      <button
-        type="button"
-        className={cn(theme.button.base, theme.button.primary)}
-        onClick={requestHelp}
-      >
-        Help
-      </button>
-
-      {item.starterSql && (
-        <button
-          type="button"
-          className={cn(theme.button.base, theme.button.primary)}
-          onClick={() => setSql(item.starterSql ?? "")}
-        >
-          Reset to starter prompt
-        </button>
-      )}
-    </div>
-
-    {helpOpen && (
-      <div className={cn(theme.card.base, "p-4 space-y-2")}>
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">AI Help</h3>
-          <button
-            type="button"
-            className={cn(theme.button.link)}
-            onClick={() => setHelpOpen(false)}
-          >
-            Close
-          </button>
-        </div>
-
-        {helpLoading && (
-          <div className={cn("text-sm", theme.page.mutedText)}>Thinking…</div>
-        )}
-
-        {helpError && (
-          <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-            {helpError}
-          </div>
-        )}
-
-        {helpText && (
-          <div className={cn("whitespace-pre-wrap text-sm", theme.page.text)}>
-            {helpText}
-          </div>
-        )}
-      </div>
-    )}
-
-    {/* Run / Check feedback */}
-    {runError && (
-    <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
-        {runError}
-    </div>
-    )}
-
-    {runResult && (
-    <div className={cn(theme.card.base, "p-4 space-y-2")}>
-        <div className="text-sm font-semibold">Results</div>
-
-        <div className="overflow-x-auto">
-        <table className="min-w-full text-xs border-collapse">
-            <thead>
-            <tr>
-                {runResult.columns.map((c) => (
-                <th key={c} className="border-b px-2 py-1 text-left font-medium">
-                    {c}
-                </th>
-                ))}
-            </tr>
-            </thead>
-            <tbody>
-            {runResult.rows.map((row, i) => (
-                <tr key={i}>
-                {row.map((cell, j) => (
-                    <td key={j} className="border-b px-2 py-1">
-                    {String(cell)}
-                    </td>
-                ))}
-                </tr>
-            ))}
-            </tbody>
-        </table>
-        </div>
-    </div>
-    )}
-
-    {runResult?.truncated && (
-    <div className={cn("pt-2 text-xs", theme.page.mutedText)}>
-        Showing first {runResult.rows.length} rows of {runResult.totalRows}.  
-        Add a LIMIT clause to see different rows.
-    </div>
-    )}
-
-    {/* Footer nav */}
-    <div className="pt-2 space-y-3">
-    {/* Row 1: Previous / Next always visible */}
-    <div className="flex items-center justify-between">
-        <button
-        type="button"
-        className={cn(theme.button.link)}
-        onClick={prev}
-        disabled={safeIdx === 0}
-        >
-        ← Previous
-        </button>
-
-        <button
-        type="button"
-        className={cn(theme.button.link)}
-        onClick={next}
-        disabled={isLast}
-        aria-disabled={isLast}
-        title={isLast ? "You're on the last question" : undefined}
-        >
-        Next →
-        </button>
-    </div>
-
-    {/* Row 2: completion actions only when last question */}
-        {isLast && (
-        <div className="grid w-full place-items-center"> 
-            <div className="flex flex-wrap gap-2 justify-center !justify-center">
-            <Link
-                href={reviewHref}
-                className={cn(theme.button.base, theme.button.third, "w-auto")}
+            {/* (1) Dataset schema (left) */}
+            <div className={cn("lg:col-span-3", theme.card.base, "p-4")}>
+            <div
+                 className="max-h-[42vh] overflow-y-auto overflow-x-hidden pr-4"
+                 style={{ scrollbarGutter: "stable" as any }}
             >
-                Review Queue
-            </Link>
 
-            {nextHref ? (
-                <Link
-                href={nextHref}
-                className={cn(theme.button.base, theme.button.third, "w-auto")}
-                >
-                Next Lesson
-                </Link>
-            ) : null}
+                {schemaTables ? (
+                <div className="space-y-4">
+                    {schemaTables.map((t) => (
+                    <div key={t.name}>
+                        <div className={cn("text-sm font-semibold", theme.page.text)}>
+                        {t.name}
+                        </div>
+
+                        <ul className="mt-1 space-y-1">
+                        {t.columns.map((c) => (
+                            <li
+                            key={c.name}
+                            className="grid grid-cols-[1fr_auto] gap-3 text-xs"
+                            >
+                            <span className={cn("font-mono", theme.page.text)}>
+                                {c.name}
+                            </span>
+                            {c.type && (
+                                <span
+                                className={cn(
+                                    "font-mono text-right tabular-nums",
+                                    theme.page.mutedText
+                                )}
+                                >
+                                {c.type}
+                                </span>
+                            )}
+                            </li>
+                        ))}
+                        </ul>
+                    </div>
+                    ))}
+                </div>
+                ) : (
+                <p className={cn("text-sm", theme.page.mutedText)}>
+                    No schema available for this dataset.
+                </p>
+                )}
             </div>
-        </div> 
-        )}
-    </div>
+            </div>
+
+          {/* (2) SQL input (center, wider) */}
+          <div className={cn("lg:col-span-6", theme.card.base, "p-4")}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Write SQL</h3>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className={cn(theme.button.base, theme.button.primary)}
+                  onClick={runSql}
+                  disabled={runLoading}
+                >
+                  {runLoading ? "Running…" : "Run"}
+                </button>
+
+                <button
+                  type="button"
+                  className={cn(theme.button.base, theme.button.primary)}
+                  onClick={checkSql}
+                  disabled={checkLoading}
+                >
+                  {checkLoading ? "Checking…" : "Check"}
+                </button>
+
+                {item.starterSql && (
+                  <button
+                    type="button"
+                    className={cn(theme.button.base, theme.button.secondary)}
+                    onClick={() => setSql(item.starterSql ?? "")}
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-3 space-y-2">
+              <textarea
+                className={cn(theme.input.textareaMono, "h-44")}
+                value={sql}
+                onChange={(e) => {
+                  setSql(e.target.value);
+                  setCheckPayload(null);
+                  setCheckError(null);
+                }}
+                placeholder="Type your SQL here…"
+              />
+              <p className={theme.input.helper}>
+                Tip: Use small steps — run often, then refine.
+              </p>
+            </div>
+
+            {/* Check feedback (kept close to editor) */}
+            {checkError && (
+              <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                {checkError}
+              </div>
+            )}
+
+            {checkPayload && (
+            <div
+                className={cn(
+                "mt-3 rounded-xl border p-3 text-sm",
+                checkPayload.ok
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                    : "border-amber-200 bg-amber-50 text-amber-900"
+                )}
+            >
+                {(() => {
+                const rulesOk = !!checkPayload.stringCheck?.ok;
+                const outputOk = !!checkPayload.resultCheck?.ok;
+
+                const missingCount = checkPayload.stringCheck?.missingKeywords?.length ?? 0;
+                const forbidCount = checkPayload.stringCheck?.forbiddenUsed?.length ?? 0;
+
+                // 1) Good
+                if (rulesOk && outputOk) {
+                    return <div>✅ Correct!</div>;
+                }
+
+                // 2) Rules followed, output not good
+                if (rulesOk && !outputOk) {
+                    return (
+                    <div className="font-medium">
+                        ⚠️ SQL syntax has expected keywords, but the output is not correct.
+                    </div>
+                    );
+                }
+
+                // 3) Missing keywords (show this first if both happen)
+                if (missingCount > 0) {
+                    return <div>⚠️ SQL command is missing required keywords.</div>;
+                }
+
+                // 4) Forbidden keywords
+                if (forbidCount > 0) {
+                    return <div>⚠️ SQL command has unexpected keywords.</div>;
+                }
+
+                // Fallback (shouldn't happen, but avoids blank box if ok=false with empty arrays)
+                return <div>⚠️ SQL command does not meet the required rules.</div>;
+                })()}
+            </div>
+            )}
 
 
-  </section>
-);
 
+
+            {/* Optional: run error near editor too */}
+            {runError && (
+              <div className="mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                {runError}
+              </div>
+            )}
+          </div>
+
+          {/* (3) Help panel (right, hidden until requested) */}
+          <div className={cn("lg:col-span-3", theme.card.base, "p-4")}>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Help</h3>
+
+              {/* Show a subtle action even when closed */}
+              {!helpOpen ? (
+                <button type="button" className={cn(theme.button.link)} onClick={requestHelp}>
+                  Get hints
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className={cn(theme.button.link)}
+                  onClick={() => setHelpOpen(false)}
+                >
+                  Close
+                </button>
+              )}
+            </div>
+
+            {/* Animated container: smoothly expands/collapses */}
+            <div
+              className={cn(
+                "mt-3 overflow-hidden transition-[max-height,opacity] duration-300 ease-out",
+                helpOpen ? "max-h-[42vh] opacity-100" : "max-h-0 opacity-0"
+              )}
+              aria-hidden={!helpOpen}
+            >
+              <div className="max-h-[42vh] overflow-auto pr-1">
+                {helpLoading && (
+                  <div className={cn("text-sm", theme.page.mutedText)}>Thinking…</div>
+                )}
+
+                {helpError && (
+                  <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                    {helpError}
+                  </div>
+                )}
+
+                {helpText && (
+                  <div className={cn("whitespace-pre-wrap text-sm", theme.page.text)}>
+                    {helpText}
+                  </div>
+                )}
+
+                {/* If opened but nothing yet */}
+                {helpOpen && !helpLoading && !helpError && !helpText && (
+                  <div className={cn("text-sm", theme.page.mutedText)}>
+                    Requesting hints…
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* When closed, show a short placeholder so the panel isn't awkwardly empty */}
+            {!helpOpen && (
+              <p className={cn("mt-3 text-sm", theme.page.mutedText)}>
+                Click <span className="font-medium">Get hints</span> to reveal guided help (no full
+                solution).
+              </p>
+            )}
+          </div>
+
+          {/* Results table (full width underneath all three) */}
+          <div className={cn("lg:col-span-12", theme.card.base, "p-4")}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">Results</h3>
+              <div className={cn("text-xs", theme.page.mutedText)}>
+                {runLoading
+                  ? "Running…"
+                  : runResult
+                  ? `${runResult.rows?.length ?? 0}${runResult.totalRows ? ` / ${runResult.totalRows}` : ""} rows`
+                  : "Run a query to see results"}
+                {runResult?.truncated ? " (truncated)" : ""}
+              </div>
+            </div>
+
+            <div className="mt-3 max-h-[52vh] overflow-auto">
+              {/* horizontal scrolling for wide results */}
+              <div className="min-w-full overflow-x-auto">
+                {runResult ? (
+                  runResult.columns?.length ? (
+                    <table className="w-full text-left text-sm">
+                      <thead className="sticky top-0 bg-white">
+                        <tr className="border-b">
+                          {runResult.columns.map((c) => (
+                            <th key={c} className="whitespace-nowrap px-3 py-2 font-semibold">
+                              {c}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {runResult.rows.map((r, ri) => (
+                          <tr key={ri} className="border-b last:border-b-0">
+                            {r.map((cell, ci) => (
+                              <td key={ci} className="whitespace-nowrap px-3 py-2">
+                                {formatCell(cell)}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p className={cn("text-sm", theme.page.mutedText)}>
+                      Query returned no columns.
+                    </p>
+                  )
+                ) : (
+                  <p className={cn("text-sm", theme.page.mutedText)}>
+                    No results yet. Click <span className="font-medium">Run</span>.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer nav (kept as you had it) */}
+        <div className="pt-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              className={cn(theme.button.link)}
+              onClick={prev}
+              disabled={safeIdx === 0}
+            >
+              ← Previous
+            </button>
+
+            <button
+              type="button"
+              className={cn(theme.button.link)}
+              onClick={next}
+              disabled={isLast}
+              aria-disabled={isLast}
+              title={isLast ? "You're on the last question" : undefined}
+            >
+              Next →
+            </button>
+          </div>
+
+          {/* Completion actions (centered) */}
+          {isLast && (
+            <div className="grid w-full place-items-center">
+              <div className="flex flex-wrap justify-center gap-2">
+                <Link href={reviewHref} className={cn(theme.button.base, theme.button.secondary)}>
+                  Review Queue
+                </Link>
+
+                {nextHref ? (
+                  <Link href={nextHref} className={cn(theme.button.base, theme.button.primary)}>
+                    Next Lesson
+                  </Link>
+                ) : null}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
 }
+

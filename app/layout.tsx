@@ -23,7 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             theme.header.border
           )}
         >
-          <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
+        <div className="flex w-full items-center justify-between px-4 py-3 md:px-8">
             <Link href="/" className={cn("font-semibold tracking-tight", theme.header.text)}>
               SQL Trainer
             </Link>
@@ -47,11 +47,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </header>
 
 
-        <main className="mx-auto max-w-5xl px-4 py-8">{children}</main>
+        <main className="w-full px-4 py-8 md:px-8">
+          {children}
+        </main>
 
         <footer className="border-t bg-white">
-          <div className={cn("mx-auto max-w-5xl px-4 py-6 text-xs", theme.page.mutedText)}>
-            MVP • Text + practice first
+            <div
+              className={cn(
+                "w-full px-4 py-6 text-xs md:px-8",
+                theme.page.mutedText
+              )}
+            >
+            Brought to you by PickleBug
           </div>
         </footer>
       </body>

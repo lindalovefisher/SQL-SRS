@@ -24,6 +24,12 @@ export const theme = {
     section: "space-y-4",
   },
 
+  no_card: {
+    base: "bg-slate-50",
+    padding: "p-0",
+    section: "space-y-0",
+  },
+
   badge: {
     neutral: "rounded-full bg-sky-50 px-3 py-1 text-xs text-sky-700",
   },

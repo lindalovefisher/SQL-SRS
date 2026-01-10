@@ -17,7 +17,10 @@ export type PracticeItem = {
   solutionSql: string;
   helpNotes?: string;
   datasetId?: string;
-
+  rules?: {
+  require?: string[];
+  forbid?: string[];
+  };
 };
 
 export type ReviewItem = {

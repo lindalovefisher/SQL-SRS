@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { PracticeItem } from "../../../content/types";
 import type { Dataset } from "../../../content/datasets/types";
-import PracticeRunner from "./PracticeRunner";
+import PracticeRunner, { type RunResult } from "./PracticeRunner";
 import SchemaPanel from "./SchemaPanel";
 import { cn, theme } from "../../lib/theme";
 
@@ -32,39 +32,42 @@ export default function PracticeWithSchema({
     [datasets, activeDatasetId]
   );
 
+  // RIGHT PANEL (Results) state lives here
+  const [runPanel, setRunPanel] = useState<{
+    loading: boolean;
+    error: string | null;
+    result: RunResult | null;
+  }>({ loading: false, error: null, result: null });
+
+const schemaTables =
+  (activeDataset as any)?.tables ??
+  (activeDataset as any)?.schema ??
+  (activeDataset as any)?.datasetSchema ??
+  null;
+
+  console.log("activeDatasetId", activeDatasetId, "found?", !!activeDataset);
+  console.log("dataset keys", activeDataset && Object.keys(activeDataset));
+
   return (
     <div className="space-y-6">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Practice: {lessonTitle}
-        </h1>
-        <p className={cn("text-sm", theme.page.mutedText)}>
-          Dataset: {activeDataset?.title ?? "Not configured"}
-        </p>
-      </header>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-1">
-          {activeDataset ? (
-            <SchemaPanel dataset={activeDataset} />
-          ) : (
-            <div className={cn(theme.card.base, "p-4 text-sm", theme.page.text)}>
-              No schema configured for this question. Add a dataset with id:{" "}
-              <span className="font-mono">{String(activeDatasetId)}</span>
-            </div>
-          )}
-        </div>
+      {/* 3 equal columns on lg: Schema | Practice | Results */}
+        <div className="grid gap-6 lg:grid-cols-3">
 
-        <div className="lg:col-span-2">
+        {/* Middle: Practice */}
+        <div className="lg:col-span-3">
             <PracticeRunner
             items={items}
             idx={idx}
             setIdx={setIdx}
             reviewHref={reviewHref ?? "/review"}
             nextHref={nextLessonHref}
+            onRunUpdate={setRunPanel}
+            schemaTables={schemaTables}
             />
         </div>
       </div>
     </div>
   );
 }
+

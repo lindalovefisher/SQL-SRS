@@ -25,15 +25,16 @@ function checkSqlString(
   const require = rules?.require ?? [];
   const forbid = rules?.forbid ?? [];
 
-  const missing = require.filter((t) => !norm.includes(t.toLowerCase()));
-  const presentForbidden = forbid.filter((t) => norm.includes(t.toLowerCase()));
+  const missingKeywords = require.filter((t) => !norm.includes(t.toLowerCase()));
+  const forbiddenUsed = forbid.filter((t) => norm.includes(t.toLowerCase()));
 
   return {
-    ok: missing.length === 0 && presentForbidden.length === 0,
-    missing,
-    presentForbidden,
+    ok: missingKeywords.length === 0 && forbiddenUsed.length === 0,
+    missingKeywords,
+    forbiddenUsed,
   };
 }
+
 
 function compareResults(
   actual: { columns: string[]; rows: any[][] },
@@ -83,10 +84,15 @@ export async function POST(req: Request) {
     const resultCheck = compareResults(actual, expected);
 
     return NextResponse.json({
-      ok: stringCheck.ok && resultCheck.ok,
-      stringCheck,
-      resultCheck,
+    ok: stringCheck.ok && resultCheck.ok,
+    stringCheck: {
+        ok: stringCheck.ok,
+        missingKeywords: stringCheck.missingKeywords ?? [],
+        forbiddenUsed: stringCheck.forbiddenUsed ?? [],
+    },
+    resultCheck, // should include .ok and optionally .message/.reasons
     });
+
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? "SQL error" }, { status: 400 });
   }

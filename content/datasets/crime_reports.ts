@@ -1,13 +1,13 @@
 import type { Dataset } from "./types";
 
-export const crime_report: Dataset = {
-  id: "crime_report",
+export const crime_reports: Dataset = {
+  id: "crime_reports",
   title: "Austin Crime Report",
   tables: [
     {
-      name: "Crime Report",
+      name: "Crime Reports",
       columns: [
-        { name: "incident_report_num", type: "TEXT" },
+        { name: "incident_report_number", type: "TEXT" },
         { name: "crime_type", type: "TEXT" },
         { name: "crime_code", type: "INTEGER" },
         { name: "family_violence", type: "TEXT" },
