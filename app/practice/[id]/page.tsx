@@ -1,3 +1,4 @@
+// app/practice/[id]/page
 import { allLessons } from "../../../content/lessons";
 import { datasets } from "../../../content/datasets";
 import { notFound } from "next/navigation";
@@ -20,6 +21,7 @@ export default async function PracticeLessonPage({
 
   return (
     <PracticeWithSchema
+      lessonId={id}
       lessonTitle={lesson.title}
       items={lesson.practice}
       datasets={datasets}

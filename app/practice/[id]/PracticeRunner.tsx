@@ -55,18 +55,34 @@ function formatCell(v: any) {
   return String(v);
 }
 
+const MAX_RENDER_ROWS = 200;
+
+function clampRunResult(result: RunResult | null): RunResult | null {
+  if (!result) return null;
+
+  const rows = Array.isArray(result.rows) ? result.rows : [];
+  if (rows.length <= MAX_RENDER_ROWS) return result;
+
+  return {
+    ...result,
+    rows: rows.slice(0, MAX_RENDER_ROWS),
+    totalRows: result.totalRows ?? rows.length,
+    truncated: true,
+  };
+}
+
+
 export default function PracticeRunner({
-  items,
-  idx,
-  setIdx,
+  item,
+  remainingCount,
   reviewHref = "/review",
   nextHref,
   onRunUpdate,
-  schemaTables,            // ✅ add
+  schemaTables,
+  onCheckComplete,
 }: {
-  items?: PracticeItem[];
-  idx: number;
-  setIdx: (n: number) => void;
+  item: PracticeItem;
+  remainingCount: number;   // 👈 add this
   reviewHref?: string;
   nextHref?: string;
   onRunUpdate?: (payload: {
@@ -74,24 +90,12 @@ export default function PracticeRunner({
     error: string | null;
     result: RunResult | null;
   }) => void;
-  schemaTables?: SchemaTable[] | null;   // ✅ add
+  schemaTables?: SchemaTable[] | null;
+  onCheckComplete: (payload: { ok: boolean; stringOk: boolean; resultOk: boolean }) => void;
 }) {
-  // Guard: items missing or empty
-  if (!items || !Array.isArray(items) || items.length === 0) {
-    return (
-      <section className={cn(theme.card.base, theme.card.padding)}>
-        <h2 className="text-lg font-semibold">Practice</h2>
-        <p className={cn("mt-2", theme.page.mutedText)}>
-          No practice questions available for this lesson yet.
-        </p>
-      </section>
-    );
-  }
 
+  
   // Clamp idx defensively
-  const safeIdx = Math.max(0, Math.min(items.length - 1, idx));
-  const item = items[safeIdx];
-  const isLast = safeIdx === items.length - 1;
 
   const [sql, setSql] = useState(item?.starterSql ?? "");
 
@@ -160,7 +164,7 @@ export default function PracticeRunner({
       "- Avoid column names unless absolutely necessary.",
       "",
       "Practice prompt:",
-      item.prompt,
+      promptText,
       "",
       "Student SQL attempt:",
       sql?.trim() ? sql.trim() : "(empty)",
@@ -211,9 +215,10 @@ export default function PracticeRunner({
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "Run failed");
 
-      const result = data.result as RunResult;
-      setRunResult(result);
-      onRunUpdate?.({ loading: false, error: null, result });
+    const result = clampRunResult(data.result as RunResult);
+    setRunResult(result);
+    onRunUpdate?.({ loading: false, error: null, result });
+
     } catch (e: any) {
       const msg = e?.message ?? "Run failed";
       setRunError(msg);
@@ -223,14 +228,18 @@ export default function PracticeRunner({
     }
   }
 
-  async function checkSql() {
-    clearOutputs();
+async function checkSql() {
+    // Do NOT call clearOutputs() here (it also clears Results + parent panel)
     setCheckLoading(true);
     setCheckError(null);
     setCheckPayload(null);
 
+    // Make the Results card show "Running..." during CHECK
+    setRunError(null);
+
 
     try {
+      const t0 = performance.now();
       const res = await fetch("/api/sql/check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -242,20 +251,59 @@ export default function PracticeRunner({
           rules: (item as any).rules,
         }),
       });
+      const t1 = performance.now();
+      console.log("CHECK: fetch ms =", Math.round(t1 - t0), "status =", res.status);
 
       const data = await res.json();
+
+      const t2 = performance.now();
+      console.log("CHECK: json parse ms =", Math.round(t2 - t1));
+
       if (!res.ok) throw new Error(data?.error || "Check failed");
       setCheckPayload(data);
+
+      const t3 = performance.now();
+      console.log("CHECK: after set Checkpayload =", Math.round(t3 - t2));
+
+      console.log(
+        "CHECK: runResult size",
+        "rows =", data.runResult?.rows?.length,
+        "cols =", data.runResult?.columns?.length
+        );
+
+        if (data.runResult) {
+        const result = clampRunResult(data.runResult as RunResult);
+        setRunResult(result);
+        onRunUpdate?.({ loading: false, error: null, result });
+        }
+
+
+      const t4 = performance.now();
+      console.log("CHECK: after runResult =", Math.round(t4 - t3));
+
+      onCheckComplete({
+        ok: !!data.ok,
+        stringOk: !!data.stringCheck?.ok,
+        resultOk: !!data.resultCheck?.ok,
+      });
+
+      const t5 = performance.now();
+      console.log("CHECK: after onCheckComplete =", Math.round(t5 - t4));
+
     } catch (e: any) {
-      setCheckError(e?.message ?? "Check failed");
+    const msg = e?.message ?? "Check failed";
+    setCheckError(msg);
+
     } finally {
-      setCheckLoading(false);
+    setCheckLoading(false);
     }
+
+
   }
 
   // When idx changes, reset editor + panels
   useEffect(() => {
-    setSql(items[safeIdx]?.starterSql ?? "");
+    setSql(item?.starterSql ?? "");
 
     setHelpOpen(false);
     setHelpText(null);
@@ -273,17 +321,17 @@ export default function PracticeRunner({
     // Clear the results panel when switching questions
     onRunUpdate?.({ loading: false, error: null, result: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [safeIdx, items]);
+  }, [item]);
 
-  function prev() {
-    setIdx(Math.max(0, safeIdx - 1));
-  }
+    const promptText =
+    String(
+        (item as any)?.prompt ??
+        (item as any)?.question ??
+        (item as any)?.text ??
+        (item as any)?.instruction ??
+        ""
+    );
 
-  function next() {
-    setIdx(Math.min(items.length - 1, safeIdx + 1));
-  }
-
-  console.log("stringCheck:", checkPayload?.stringCheck);
   return (
     <section className={cn("space-y-4", theme.card.section)}>
       {/* Card 1: Question header only */}
@@ -291,9 +339,12 @@ export default function PracticeRunner({
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold">
-              Question {safeIdx + 1} / {items.length}
+            Practice{" "}
+            <span className="text-sm font-normal text-zinc-500">
+                ({remainingCount} left)
+            </span>
             </h2>
-            <p className={cn("mt-1", theme.page.text)}>{item.prompt}</p>
+            <p className={cn("mt-1", theme.page.text)}>{promptText}</p>
           </div>
 
           <span className={theme.badge.neutral}>Practice</span>
@@ -399,7 +450,8 @@ export default function PracticeRunner({
                 placeholder="Type your SQL here…"
               />
               <p className={theme.input.helper}>
-                Tip: Use small steps — run often, then refine.
+                Run will output results below and if cmd is invalid show the error message.
+                Check will also check against the correct answer to the question.  
               </p>
             </div>
 
@@ -536,7 +588,7 @@ export default function PracticeRunner({
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold">Results</h3>
               <div className={cn("text-xs", theme.page.mutedText)}>
-                {runLoading
+                {(runLoading || checkLoading)
                   ? "Running…"
                   : runResult
                   ? `${runResult.rows?.length ?? 0}${runResult.totalRows ? ` / ${runResult.totalRows}` : ""} rows`
@@ -561,7 +613,7 @@ export default function PracticeRunner({
                         </tr>
                       </thead>
                       <tbody>
-                        {runResult.rows.map((r, ri) => (
+                          {runResult.rows.slice(0, 200).map((r, ri) => (
                           <tr key={ri} className="border-b last:border-b-0">
                             {r.map((cell, ci) => (
                               <td key={ci} className="whitespace-nowrap px-3 py-2">
@@ -589,44 +641,7 @@ export default function PracticeRunner({
 
         {/* Footer nav (kept as you had it) */}
         <div className="pt-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <button
-              type="button"
-              className={cn(theme.button.link)}
-              onClick={prev}
-              disabled={safeIdx === 0}
-            >
-              ← Previous
-            </button>
 
-            <button
-              type="button"
-              className={cn(theme.button.link)}
-              onClick={next}
-              disabled={isLast}
-              aria-disabled={isLast}
-              title={isLast ? "You're on the last question" : undefined}
-            >
-              Next →
-            </button>
-          </div>
-
-          {/* Completion actions (centered) */}
-          {isLast && (
-            <div className="grid w-full place-items-center">
-              <div className="flex flex-wrap justify-center gap-2">
-                <Link href={reviewHref} className={cn(theme.button.base, theme.button.secondary)}>
-                  Review Queue
-                </Link>
-
-                {nextHref ? (
-                  <Link href={nextHref} className={cn(theme.button.base, theme.button.primary)}>
-                    Next Lesson
-                  </Link>
-                ) : null}
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </section>

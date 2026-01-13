@@ -3,6 +3,7 @@ import { allLessons as lessons } from "../../../content/lessons";
 import { notFound } from "next/navigation";
 import LessonTabs from "./LessonTabs";
 import { cn, theme } from "../../lib/theme";
+import LearnedBadge from "./LearnedBadge";
 
 export default async function LessonDetail({
   params,
@@ -21,7 +22,7 @@ export default async function LessonDetail({
           ← Back to lessons
         </Link>
 
-        <span className={theme.badge.neutral}>Lesson</span>
+        <LearnedBadge lessonId={id} />
       </div>
 
       <header className="space-y-2">

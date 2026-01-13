@@ -1,4 +1,5 @@
-export const runtime = "nodejs";
+// app/api/sql/.ts
+// export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import { loadDbFromFile, execOne } from "@/app/lib/sql/buildDb";
@@ -10,10 +11,26 @@ function normalize(v: any) {
   return v;
 }
 
-function sortRows(rows: any[][]) {
-  return [...rows].sort((a, b) =>
-    JSON.stringify(a).localeCompare(JSON.stringify(b))
-  );
+const PREVIEW_ROWS = 200;
+const DIFF_PREVIEW_ROWS = 20;
+
+function asWrapped(sql: string) {
+  // wrap so we can safely EXCEPT even if sql has ORDER BY / LIMIT
+  return `SELECT * FROM (${sql})`;
+}
+
+function buildExceptSql(studentSql: string, solutionSql: string) {
+  const extraSql = `${asWrapped(studentSql)} EXCEPT ${asWrapped(solutionSql)}`;
+  const missingSql = `${asWrapped(solutionSql)} EXCEPT ${asWrapped(studentSql)}`;
+
+  const extraPreviewSql = `SELECT * FROM (${extraSql}) LIMIT ${DIFF_PREVIEW_ROWS}`;
+  const missingPreviewSql = `SELECT * FROM (${missingSql}) LIMIT ${DIFF_PREVIEW_ROWS}`;
+
+  // row counts (still server-side; but note: counting EXCEPT results may be heavy on giant outputs)
+  const extraCountSql = `SELECT COUNT(*) as n FROM (${extraSql})`;
+  const missingCountSql = `SELECT COUNT(*) as n FROM (${missingSql})`;
+
+  return { extraSql, missingSql, extraPreviewSql, missingPreviewSql, extraCountSql, missingCountSql };
 }
 
 function checkSqlString(
@@ -33,21 +50,6 @@ function checkSqlString(
     missingKeywords,
     forbiddenUsed,
   };
-}
-
-
-function compareResults(
-  actual: { columns: string[]; rows: any[][] },
-  expected: { columns: string[]; rows: any[][] }
-) {
-  const sameCols = JSON.stringify(actual.columns) === JSON.stringify(expected.columns);
-
-  const aRows = sortRows(actual.rows.map((r) => r.map(normalize)));
-  const eRows = sortRows(expected.rows.map((r) => r.map(normalize)));
-
-  const sameRows = JSON.stringify(aRows) === JSON.stringify(eRows);
-
-  return { ok: sameCols && sameRows, sameCols, sameRows };
 }
 
 export async function POST(req: Request) {
@@ -75,13 +77,37 @@ export async function POST(req: Request) {
 
     const stringCheck = checkSqlString(sql, rules);
 
-    // IMPORTANT: for Check, use the raw SQL (no auto LIMIT)
-    const actual = execOne(db, sql);
-    const expected = execOne(db, solutionSql);
+    // IMPORTANT: for Check, do the correctness comparison on the server,
+    // but do NOT return giant result sets to the browser.
+
+    // 1) Preview of student's output for the Results card (safe size)
+    const previewSql = `SELECT * FROM (${sql}) LIMIT ${PREVIEW_ROWS}`;
+    const actualPreview = execOne(db, previewSql);
+
+    // 2) Compare student vs solution using EXCEPT both directions (order-independent)
+    const { extraPreviewSql, missingPreviewSql, extraCountSql, missingCountSql } =
+    buildExceptSql(sql, solutionSql);
+
+    // Small previews of diffs (helps user understand what’s wrong)
+    const extraPreview = execOne(db, extraPreviewSql);
+    const missingPreview = execOne(db, missingPreviewSql);
+
+    // Counts of how many differences exist
+    const extraCountRes = execOne(db, extraCountSql);
+    const missingCountRes = execOne(db, missingCountSql);
 
     db.close();
 
-    const resultCheck = compareResults(actual, expected);
+    const extraCount = Number(extraCountRes.rows?.[0]?.[0] ?? 0);
+    const missingCount = Number(missingCountRes.rows?.[0]?.[0] ?? 0);
+
+    const resultCheck = {
+    ok: extraCount === 0 && missingCount === 0,
+    extraCount,
+    missingCount,
+    extraPreview,   // up to 20 rows
+    missingPreview, // up to 20 rows
+    };
 
     return NextResponse.json({
     ok: stringCheck.ok && resultCheck.ok,
@@ -90,8 +116,15 @@ export async function POST(req: Request) {
         missingKeywords: stringCheck.missingKeywords ?? [],
         forbiddenUsed: stringCheck.forbiddenUsed ?? [],
     },
-    resultCheck, // should include .ok and optionally .message/.reasons
+    resultCheck,
+    // Only return a safe preview to populate the UI Results card
+    runResult: {
+        ...actualPreview,
+        totalRows: actualPreview.rows?.length ?? 0,
+        truncated: true,
+    },
     });
+
 
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? "SQL error" }, { status: 400 });
