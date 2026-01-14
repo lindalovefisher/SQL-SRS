@@ -28,13 +28,13 @@ export const introSelect: Lesson = {
     {
       prompt: "For all incidents, retrieve the incident number, date reported, and location type",
       starterSql: "select *\nfrom crime_reports",
-      solutionSql: "select incident_report_number, report_date, location_type\nfrom crime_reports",
+      solutionSql: "select incident_report_number, rep_date, location_type\nfrom crime_reports",
       datasetId: "crime_reports",
     },
     {
       prompt: "For all incidents, retrieve the incident number, date reported, and clearance status",
       starterSql: "select *\nfrom crime_reports",
-      solutionSql: "select incident_report_number, report_date, clearance_status\nfrom crime_reports",
+      solutionSql: "select incident_report_number, rep_date, clearance_status\nfrom crime_reports",
       datasetId: "crime_reports",
     },
     {
