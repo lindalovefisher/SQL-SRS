@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { PracticeItem } from "../../../content/types";
+import type { Dataset } from "../../../content/datasets/types";
 import { cn, theme } from "../../lib/theme";
 
 export type RunResult = {
@@ -37,18 +38,18 @@ function clampRunResult(result: RunResult | null): RunResult | null {
 export default function PracticeRunner({
   item,
   remainingCount,
-  untestedCount,
+  notStartedCount,
   completedCount,
-  toBeRetestedCount,
+  tryAgainCount,
   onRunUpdate,
   onCheckComplete,
   activeDataset,
 }: {
   item: PracticeItem;
   remainingCount: number;
-  untestedCount: number;
+  notStartedCount: number;
   completedCount: number;
-  toBeRetestedCount: number;
+  tryAgainCount: number;
 
   onRunUpdate?: (payload: {
     loading: boolean;
@@ -56,7 +57,11 @@ export default function PracticeRunner({
     result: RunResult | null;
   }) => void;
 
-  onCheckComplete: (payload: { ok: boolean; stringOk: boolean; resultOk: boolean }) => void;
+  onCheckComplete: (payload: {
+    ok: boolean;
+    stringOk: boolean;
+    resultOk: boolean;
+  }) => void;
 
   activeDataset?: Dataset | null;
 }) {
@@ -78,7 +83,13 @@ export default function PracticeRunner({
   const [checkError, setCheckError] = useState<string | null>(null);
   const [checkPayload, setCheckPayload] = useState<{
     ok: boolean;
-    stringCheck: { ok: boolean; reasons?: string[]; message?: string; missingKeywords?: string[]; forbiddenUsed?: string[] };
+    stringCheck: {
+      ok: boolean;
+      reasons?: string[];
+      message?: string;
+      missingKeywords?: string[];
+      forbiddenUsed?: string[];
+    };
     resultCheck: { ok: boolean; reasons?: string[]; message?: string };
     runResult?: RunResult;
   } | null>(null);
@@ -192,7 +203,7 @@ export default function PracticeRunner({
     }
   }
 
-    async function checkSql() {
+  async function checkSql() {
     setCheckLoading(true);
     setCheckError(null);
     setCheckPayload(null);
@@ -201,68 +212,53 @@ export default function PracticeRunner({
     setRunError(null);
 
     try {
-        const res = await fetch("/api/sql/check", {
+      const res = await fetch("/api/sql/check", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-            sql,
-            solutionSql: item.solutionSql,
-            datasetId: item.datasetId,
-            rules: (item as any).rules,
+          sql,
+          solutionSql: item.solutionSql,
+          datasetId: item.datasetId,
+          rules: (item as any).rules,
         }),
-        });
+      });
 
-        // Always try to parse JSON, even if res.ok is false
-        const data = await res.json().catch(() => null);
+      const data = await res.json().catch(() => null);
 
-        // If the server gave us structured check info, treat it as a valid check result,
-        // even when HTTP status is non-2xx.
-        const hasCheckShape =
+      const hasCheckShape =
         data &&
         typeof data === "object" &&
         ("ok" in data || "stringCheck" in data || "resultCheck" in data);
 
-        if (!hasCheckShape) {
-        // This is a true error (not a wrong answer payload)
+      if (!hasCheckShape) {
         const msg =
-            (data && (data.error || data.message)) ||
-            `Check failed (${res.status})`;
+          (data && (data.error || data.message)) || `Check failed (${res.status})`;
         setCheckError(msg);
-        // IMPORTANT: still mark as a failed check attempt in the round
         onCheckComplete({ ok: false, stringOk: false, resultOk: false });
         return;
-        }
+      }
 
-        // At this point it's a real check response (correct OR incorrect)
-        setCheckPayload(data);
+      setCheckPayload(data);
 
-        // If server also returned a runResult for display
-        if (data.runResult) {
+      if (data.runResult) {
         const result = clampRunResult(data.runResult as RunResult);
         setRunResult(result);
         onRunUpdate?.({ loading: false, error: null, result });
-        }
+      }
 
-        // Always inform parent whether it passed or failed
-        onCheckComplete({
+      onCheckComplete({
         ok: !!data.ok,
         stringOk: !!data.stringCheck?.ok,
         resultOk: !!data.resultCheck?.ok,
-        });
-
-        // If HTTP was non-2xx but we got a check payload, do NOT treat it as an error.
-        // (Optional: you could still show a small warning, but better to keep UX clean.)
+      });
     } catch (e: any) {
-        const msg = e?.message ?? "Check failed";
-        setCheckError(msg);
-
-        // Still mark as a failed check attempt in the round
-        onCheckComplete({ ok: false, stringOk: false, resultOk: false });
+      const msg = e?.message ?? "Check failed";
+      setCheckError(msg);
+      onCheckComplete({ ok: false, stringOk: false, resultOk: false });
     } finally {
-        setCheckLoading(false);
+      setCheckLoading(false);
     }
-    }
-
+  }
 
   // When item changes, reset editor + panels
   useEffect(() => {
@@ -287,16 +283,11 @@ export default function PracticeRunner({
 
   return (
     <section className={cn("space-y-4", theme.card.section)}>
-      {/* Full-width Practice header card (kept as before) */}
+      {/* Practice header card */}
       <div className={cn(theme.card.base, theme.card.padding)}>
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold">
-            Practice{" "}
-            <span className="text-sm font-normal text-zinc-500">
-                {untestedCount} Not Tested · {completedCount} Completed · {toBeRetestedCount} To Be Retested
-            </span>
-            </h2>
+            <h2 className="text-lg font-semibold">Practice</h2>
             <p className={cn("mt-1", theme.page.text)}>{promptText}</p>
           </div>
 
@@ -307,47 +298,45 @@ export default function PracticeRunner({
       {/* 3-panel workspace + results */}
       <div className={cn(theme.no_card.base, theme.no_card.padding)}>
         <div className="grid gap-4 lg:grid-cols-12">
-        {/* (1) Schema (left) – responsive, real alignment */}
-        <div className={cn("lg:col-span-3", theme.card.base, "p-4")}>
-        <div className="max-h-[42vh] overflow-auto pr-1 space-y-3">
-            {activeDataset?.tables?.length ? (
-            activeDataset.tables.map((t) => (
-                <div key={t.name}>
-                <div className={cn("text-sm font-semibold", theme.page.text)}>
-                    {t.name}
-                </div>
+          {/* (1) Schema (left) */}
+          <div className={cn("lg:col-span-3", theme.card.base, "p-4")}>
+            <div className="max-h-[42vh] overflow-auto pr-1 space-y-3">
+              {activeDataset?.tables?.length ? (
+                activeDataset.tables.map((t) => (
+                  <div key={t.name}>
+                    <div className={cn("text-sm font-semibold", theme.page.text)}>
+                      {t.name}
+                    </div>
 
-                <ul className="mt-1 space-y-1">
-                    {t.columns.map((c) => (
-                    <li
-                        key={c.name}
-                        className="grid grid-cols-[1fr_auto] gap-3 text-xs"
-                    >
-                        <span className={cn("font-mono", theme.page.text)}>
-                        {c.name}
-                        </span>
-                        <span
-                        className={cn(
-                            "font-mono text-right tabular-nums",
-                            theme.page.mutedText
-                        )}
+                    <ul className="mt-1 space-y-1">
+                      {t.columns.map((c) => (
+                        <li
+                          key={c.name}
+                          className="grid grid-cols-[1fr_auto] gap-3 text-xs"
                         >
-                        {c.type}
-                        </span>
-                    </li>
-                    ))}
-                </ul>
-                </div>
-            ))
-            ) : (
-            <p className={cn("text-sm", theme.page.mutedText)}>
-                No schema available for this dataset.
-            </p>
-            )}
-        </div>
-        </div>
-
-
+                          <span className={cn("font-mono", theme.page.text)}>
+                            {c.name}
+                          </span>
+                          <span
+                            className={cn(
+                              "font-mono text-right tabular-nums",
+                              theme.page.mutedText
+                            )}
+                          >
+                            {c.type}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))
+              ) : (
+                <p className={cn("text-sm", theme.page.mutedText)}>
+                  No schema available for this dataset.
+                </p>
+              )}
+            </div>
+          </div>
 
           {/* (2) SQL input (center) */}
           <div className={cn("lg:col-span-6", theme.card.base, "p-4")}>
@@ -419,8 +408,10 @@ export default function PracticeRunner({
                   const rulesOk = !!checkPayload.stringCheck?.ok;
                   const outputOk = !!checkPayload.resultCheck?.ok;
 
-                  const missingCount = checkPayload.stringCheck?.missingKeywords?.length ?? 0;
-                  const forbidCount = checkPayload.stringCheck?.forbiddenUsed?.length ?? 0;
+                  const missingCount =
+                    checkPayload.stringCheck?.missingKeywords?.length ?? 0;
+                  const forbidCount =
+                    checkPayload.stringCheck?.forbiddenUsed?.length ?? 0;
 
                   if (rulesOk && outputOk) return <div>✅ Correct!</div>;
                   if (rulesOk && !outputOk)
@@ -429,8 +420,10 @@ export default function PracticeRunner({
                         ⚠️ SQL syntax has expected keywords, but the output is not correct.
                       </div>
                     );
-                  if (missingCount > 0) return <div>⚠️ SQL command is missing required keywords.</div>;
-                  if (forbidCount > 0) return <div>⚠️ SQL command has unexpected keywords.</div>;
+                  if (missingCount > 0)
+                    return <div>⚠️ SQL command is missing required keywords.</div>;
+                  if (forbidCount > 0)
+                    return <div>⚠️ SQL command has unexpected keywords.</div>;
                   return <div>⚠️ SQL command does not meet the required rules.</div>;
                 })()}
               </div>
@@ -449,7 +442,11 @@ export default function PracticeRunner({
               <h3 className="text-sm font-semibold">Help</h3>
 
               {!helpOpen ? (
-                <button type="button" className={cn(theme.button.link)} onClick={requestHelp}>
+                <button
+                  type="button"
+                  className={cn(theme.button.link)}
+                  onClick={requestHelp}
+                >
                   Get hints
                 </button>
               ) : (
@@ -471,7 +468,9 @@ export default function PracticeRunner({
               aria-hidden={!helpOpen}
             >
               <div className="max-h-[42vh] overflow-auto pr-1">
-                {helpLoading && <div className={cn("text-sm", theme.page.mutedText)}>Thinking…</div>}
+                {helpLoading && (
+                  <div className={cn("text-sm", theme.page.mutedText)}>Thinking…</div>
+                )}
 
                 {helpError && (
                   <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-800">
@@ -480,11 +479,15 @@ export default function PracticeRunner({
                 )}
 
                 {helpText && (
-                  <div className={cn("whitespace-pre-wrap text-sm", theme.page.text)}>{helpText}</div>
+                  <div className={cn("whitespace-pre-wrap text-sm", theme.page.text)}>
+                    {helpText}
+                  </div>
                 )}
 
                 {helpOpen && !helpLoading && !helpError && !helpText && (
-                  <div className={cn("text-sm", theme.page.mutedText)}>Requesting hints…</div>
+                  <div className={cn("text-sm", theme.page.mutedText)}>
+                    Requesting hints…
+                  </div>
                 )}
               </div>
             </div>
@@ -504,7 +507,9 @@ export default function PracticeRunner({
                 {runLoading || checkLoading
                   ? "Running…"
                   : runResult
-                  ? `${runResult.rows?.length ?? 0}${runResult.totalRows ? ` / ${runResult.totalRows}` : ""} rows`
+                  ? `${runResult.rows?.length ?? 0}${
+                      runResult.totalRows ? ` / ${runResult.totalRows}` : ""
+                    } rows`
                   : "Run a query to see results"}
                 {runResult?.truncated ? " (truncated)" : ""}
               </div>
@@ -554,3 +559,5 @@ export default function PracticeRunner({
     </section>
   );
 }
+
+
