@@ -1,6 +1,7 @@
-// app/practice/[id]/page
-import { allLessons } from "../../../content/lessons";
-import { datasets } from "../../../content/datasets";
+// app/lesson/[id]/practice/page.tsx  (or app/practice/[id]/page.tsx)
+import Link from "next/link";
+import { allLessons } from "../../../../content/lessons";
+import { datasets } from "../../../../content/datasets";
 import { notFound } from "next/navigation";
 import PracticeWithSchema from "./PracticeWithSchema";
 
@@ -19,7 +20,7 @@ export default async function PracticeLessonPage({
   const nextLesson = allLessons[lessonIndex + 1] ?? null;
   const nextLessonHref = nextLesson ? `/lesson/${nextLesson.id}` : undefined;
 
-  return (
+return (
     <PracticeWithSchema
       lessonId={id}
       lessonTitle={lesson.title}
@@ -28,7 +29,9 @@ export default async function PracticeLessonPage({
       fallbackDatasetId={lesson.defaultDatasetId}
       reviewHref="/review"
       nextLessonHref={nextLessonHref}
+      backToLessonHref={`/lesson/${id}`}   // ✅ NEW
     />
   );
 }
+
 

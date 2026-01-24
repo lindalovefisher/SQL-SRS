@@ -30,6 +30,18 @@ export const theme = {
     section: "space-y-0",
   },
 
+   surface: {
+    outer: {
+      neutral: "border-zinc-200 bg-zinc-50",
+      colored:  "border-sky-700 bg-sky-100",
+      lesson:  "border-sky-700 bg-sky-100",
+      review:  "border-sky-700 bg-sky-100",
+/*      lesson: "border-emerald-700 bg-emerald-50",
+      review: "border-amber-700 bg-amber-50", */
+    },
+    innerCard: "border bg-white shadow-sm",
+  },
+
   badge: {
     neutral: "rounded-full bg-sky-50 px-3 py-1 text-xs text-sky-700",
   },

@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { PracticeItem } from "../../../content/types";
-import type { Dataset } from "../../../content/datasets/types";
-import { cn, theme } from "../../lib/theme";
+import type { PracticeItem } from "../../../../content/types";
+import type { Dataset } from "../../../../content/datasets/types";
+import { cn, theme } from "../../../lib/theme";
 
 export type RunResult = {
   columns: string[];

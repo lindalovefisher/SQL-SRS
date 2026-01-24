@@ -6,6 +6,9 @@ export const introSelect: Lesson = {
   summary: "Write your first query",
   concept:
     "SELECT chooses which columns to return from a table.",
+
+  videoUrl: "/videos/intro-select.mp4",
+  videoPosterUrl: "/videos/intro-select.jpg",
   syntax:
     "SELECT <columns>\nFROM <table>;",
   examples: [

@@ -1,11 +1,22 @@
 "use client";
-
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import type { PracticeItem } from "../../../content/types";
-import type { Dataset } from "../../../content/datasets/types";
+import type { PracticeItem } from "../../../../content/types";
+import type { Dataset } from "../../../../content/datasets/types";
 import PracticeRunner, { type RunResult } from "./PracticeRunner";
-import { cn, theme } from "../../lib/theme";
+import { cn, theme } from "../../../lib/theme";
 import { useRouter } from "next/navigation";
+import {
+  enqueueLessonItemsForReview,
+  hasReviewItem,
+  clearReviewStore,
+} from "../../../lib/reviewstore";
+
+import {
+  readLessonProgressV2,
+  writeLessonProgressV2,
+} from "../../../lib/lessonProgressStore";
+
 
 function ProgressChip({
   label,
@@ -55,14 +66,16 @@ export default function PracticeWithSchema({
   fallbackDatasetId,
   reviewHref,
   nextLessonHref,
+  backToLessonHref, // ✅ NEW
 }: {
   lessonId: string;
   lessonTitle: string;
-  items: PracticeItem[];
-  datasets: Dataset[];
+  items: any[]; // whatever your types are
+  datasets: any; // whatever your types are
   fallbackDatasetId?: string;
   reviewHref?: string;
   nextLessonHref?: string;
+  backToLessonHref?: string; // ✅ NEW
 }) {
   const DEBUG = false;
 
@@ -113,6 +126,11 @@ export default function PracticeWithSchema({
     [datasets, activeDatasetId]
   );
 
+const actionBtnClass = cn(
+  theme.button.base,
+  theme.button.primary
+);
+
   // =========================
   // Persisted lesson progress (kept as-is)
   // =========================
@@ -129,61 +147,6 @@ export default function PracticeWithSchema({
   };
 
   const lessonKey = `sqltrainer:srs:${lessonId}`;
-
-  function readLessonProgressV2(key: string): LessonProgressV2 {
-    const empty: LessonProgressV2 = {
-      v: 2,
-      lessonId,
-      updatedAt: Date.now(),
-      learnedOnce: false,
-      items: {},
-    };
-
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return empty;
-
-      const saved: any = JSON.parse(raw);
-
-      if (saved && saved.v === 2) {
-        return {
-          v: 2,
-          lessonId,
-          updatedAt: typeof saved.updatedAt === "number" ? saved.updatedAt : Date.now(),
-          learnedOnce: !!saved.learnedOnce,
-          items: typeof saved.items === "object" && saved.items ? saved.items : {},
-        };
-      }
-
-      const migratedLearnedOnce =
-        typeof saved?.learnedOnce === "boolean"
-          ? saved.learnedOnce
-          : typeof saved?.learned === "boolean"
-          ? saved.learned
-          : false;
-
-      return { ...empty, learnedOnce: migratedLearnedOnce };
-    } catch {
-      return empty;
-    }
-  }
-
-  function writeLessonProgressV2(key: string, progress: LessonProgressV2) {
-    const existingRaw = localStorage.getItem(key);
-    const existing = existingRaw ? JSON.parse(existingRaw) : {};
-
-    const payload = {
-      ...existing,
-      ...progress,
-      v: 2,
-      lessonId,
-      updatedAt: Date.now(),
-      learnedOnce: !!progress.learnedOnce,
-      items: progress.items ?? {},
-    };
-
-    localStorage.setItem(key, JSON.stringify(payload));
-  }
 
   // =========================
   // Random navigation
@@ -320,6 +283,13 @@ export default function PracticeWithSchema({
     const idx = activeIndex;
     const staged = pendingCommit;
 
+    dbg("CONTINUE clicked", {
+    pendingCommit,
+    remainingSize: remaining.size,
+    willFinishAfterContinue,
+    });
+
+
     if (!staged || staged.idx !== idx) {
       setReadyForNext(false);
       setPendingCommit(null);
@@ -363,16 +333,36 @@ export default function PracticeWithSchema({
         return next;
       });
 
-      // Persist learned marker (optional)
-      try {
+    try {
         const progress = readLessonProgressV2(lessonKey);
-        const itemKey = `practice:index:${idx}`;
-        progress.items[itemKey] = { kind: "practice", status: "learned" };
-        writeLessonProgressV2(lessonKey, progress);
-        window.dispatchEvent(new Event("lesson-progress"));
-      } catch {
-        // ignore
-      }
+        console.log("[SRS] ENQUEUE readLessonProgressV2", {
+        learnedOnce: progress.learnedOnce,
+    });
+
+    // mark this specific practice item learned
+    const itemKey = `practice:index:${idx}`;
+    progress.items[itemKey] = { kind: "practice", status: "learned" };
+
+    if (willFinishAfterContinue && !progress.learnedOnce) {
+        const added = enqueueLessonItemsForReview({ lessonId, items });
+        console.log("[SRS] ENQUEUE ran", { lessonId, total: items.length, added });
+
+        progress.learnedOnce = true;
+    } else {
+    console.log("[SRS] ENQUEUE skipped", {
+        willFinishAfterContinue,
+        learnedOnce: progress.learnedOnce,
+        remainingSize: remaining.size,
+    });
+    }
+
+
+    writeLessonProgressV2(lessonKey, progress);
+    window.dispatchEvent(new Event("lesson-progress"));
+    } catch {
+    // ignore
+    }
+
     } else if (staged.willTryAgain) {
       // Move to Try Again (and out of Completed, just in case)
       setCommittedRetest((prev) => {
@@ -397,9 +387,49 @@ export default function PracticeWithSchema({
     setAttemptHadFail(false);
 
     if (willFinishAfterContinue && nextLessonHref) {
-      router.push(nextLessonHref);
-      return;
+    dbg("LESSON FINISHED", { lessonId });
+
+    // 1️⃣ Persist lesson completion
+    try {
+        const progress = readLessonProgressV2(lessonKey);
+        progress.learnedOnce = true; // ← THIS was missing / unreliable
+        writeLessonProgressV2(lessonKey, progress);
+        window.dispatchEvent(new Event("lesson-progress"));
+    } catch {}
+
+    // 2️⃣ Enqueue review items (ONCE)
+    try {
+        const firstId = `${lessonId}:idx-0`;
+        if (!hasReviewItem(firstId)) {
+        const added = enqueueLessonItemsForReview({
+            lessonId,
+            items,
+            dueInMs: 10 * 60 * 1000,
+        });
+        dbg("ENQUEUED review items", { added });
+        } else {
+        dbg("ENQUEUE skipped (already exists)");
+        }
+    } catch (e) {
+        dbg("ENQUEUE ERROR", e);
     }
+
+    // ✅ Mark the whole lesson as learned (this drives unlock + Home “Next Lesson”)
+    try {
+    const progress = readLessonProgressV2(lessonKey);
+    progress.learnedOnce = true;
+    writeLessonProgressV2(lessonKey, progress);
+    window.dispatchEvent(new Event("lesson-progress"));
+    dbg("SAVED learnedOnce=true", { lessonId, key: lessonKey });
+    } catch (e) {
+    dbg("FAILED to save learnedOnce", e);
+    }
+
+    // 3️⃣ Navigate
+    router.push(nextLessonHref);
+    return;
+    }
+
 
     const nextIdx = pickRandomNext(idx);
 
@@ -416,6 +446,13 @@ export default function PracticeWithSchema({
   // =========================
   function resetLessonProgressForTesting() {
     try {
+
+    localStorage.removeItem(lessonKey);
+    window.dispatchEvent(new Event("lesson-progress"));
+
+
+      clearReviewStore(); // ✅ clear review queue too
+
       const empty: LessonProgressV2 = {
         v: 2,
         lessonId,
@@ -468,28 +505,54 @@ export default function PracticeWithSchema({
         }
       `}</style>
 
-      {/* Progress + Continue on the SAME ROW (no layout shift) */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <ProgressChip label="Not Started" count={notStartedShown} popKey={0} />
-          <ProgressChip label="Try Again" count={tryAgainShown} popKey={tryAgainPopKey} />
-          <ProgressChip label="Completed" count={completedShown} popKey={completedPopKey} />
+      {/* Back (left) + Progress (center) + Continue/Next (right) */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 items-center gap-3">
+        {/* Left */}
+        <div className="justify-self-start">
+          {backToLessonHref && (
+          <Link
+            href={`/lesson/${lessonId}`}
+            className={cn(theme.button.link)}
+          >
+            ← Back to lesson
+          </Link>
+
+          )}
         </div>
 
-        <button
-          type="button"
-          onClick={onContinue}
-          disabled={!readyForNext}
-          className={cn(
-            theme.badge.neutral,
-            "min-h-[34px] px-4",
-            readyForNext ? "visible cursor-pointer" : "invisible"
+        {/* Center */}
+        <div className="justify-self-center">
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <ProgressChip label="Not Started" count={notStartedShown} popKey={0} />
+            <ProgressChip label="Try Again" count={tryAgainShown} popKey={tryAgainPopKey} />
+            <ProgressChip label="Completed" count={completedShown} popKey={completedPopKey} />
+          </div>
+        </div>
+
+        {/* Right */}
+        <div className="justify-self-end">
+          {willFinishAfterContinue && nextLessonHref ? (
+            <Link
+              href={nextLessonHref}
+              className={cn(theme.button.link)}
+            >
+              Go to Next Lesson →
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick={onContinue}
+              disabled={!readyForNext}
+              className={cn(
+                theme.button.link,
+                !readyForNext && "opacity-50 cursor-not-allowed"
+              )}
+            >
+              Continue →
+            </button>
           )}
-        >
-          <span className="text-sm font-normal">
-            {willFinishAfterContinue && nextLessonHref ? "Go to Next Lesson →" : "Continue →"}
-          </span>
-        </button>
+        </div>
+
       </div>
 
       {DEBUG && (
@@ -516,6 +579,9 @@ export default function PracticeWithSchema({
             <div>committedRetest.size: {committedRetest.size}</div>
             <div>committedCompleted.size: {committedCompleted.size}</div>
             <div>pendingCommit: {pendingCommit ? JSON.stringify(pendingCommit) : "null"}</div>
+            <div>willFinishAfterContinue: {String(willFinishAfterContinue)}</div>
+            <div>nextLessonHref: {String(nextLessonHref)}</div>
+            
             <div>runnerNonce: {runnerNonce}</div>
           </div>
         </div>

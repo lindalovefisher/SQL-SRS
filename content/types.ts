@@ -9,6 +9,10 @@ export type Lesson = {
 
   practice: PracticeItem[];
   reviewPool: ReviewItem[];
+
+  // NEW:
+  videoUrl?: string; // hosted mp4 or share link
+  videoPosterUrl?: string;
 };
 
 export type PracticeItem = {

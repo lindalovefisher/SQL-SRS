@@ -4,6 +4,8 @@ import { notFound } from "next/navigation";
 import LessonTabs from "./LessonTabs";
 import { cn, theme } from "../../lib/theme";
 import LearnedBadge from "./LearnedBadge";
+import LessonActions from "./LessonActions";
+
 
 export default async function LessonDetail({
   params,
@@ -17,41 +19,19 @@ export default async function LessonDetail({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <Link href="/lessons" className={cn(theme.button.link)}>
-          ← Back to lessons
-        </Link>
+      {/* Top row: Back button */}
+      <LessonActions />
 
-        <LearnedBadge lessonId={id} />
-      </div>
-
+      {/* Title */}
       <header className="space-y-2">
-        <h1 className="text-3xl font-semibold tracking-tight">{lesson.title}</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">
+          {lesson.title}
+        </h1>
         <p className={theme.page.mutedText}>{lesson.summary}</p>
       </header>
 
+      {/* Tabs */}
       <LessonTabs lesson={lesson} />
-
-      <section className={cn(theme.card.base, theme.card.padding)}>
-        <h2 className="text-lg font-semibold">Next</h2>
-        <p className={cn("mt-2", theme.page.text)}>Ready to practice?</p>
-
-        <div className="mt-4 flex flex-wrap gap-3">
-          <Link
-            href={`/practice/${lesson.id}`}
-            className={cn(theme.button.base, theme.button.primary)}
-          >
-            Practice
-          </Link>
-
-          <Link
-            href="/review"
-            className={cn(theme.button.base, theme.button.secondary)}
-          >
-            Review Queue
-          </Link>
-        </div>
-      </section>
     </div>
   );
 }
